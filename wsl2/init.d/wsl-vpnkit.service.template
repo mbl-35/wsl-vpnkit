@@ -32,7 +32,7 @@ do_status () {
 
 case "$1" in
     start|"")
-        kill $(cat /var/run/wsl-vpnkit.pid >/dev/null 2>&1) > /dev/null  2>&1 || true
+        kill -2 $(cat /var/run/wsl-vpnkit.pid >/dev/null 2>&1) > /dev/null  2>&1 || true
         /sbin/wsl-vpnkit &
         WSL_VPNKIT_PID=$!
         echo "${WSL_VPNKIT_PID}" > /var/run/wsl-vpnkit.pid
@@ -45,10 +45,11 @@ case "$1" in
         PID=$(cat /var/run/wsl-vpnkit.pid)
         if ps -p $PID > /dev/null
         then
-           kill -9 $(cat /var/run/wsl-vpnkit.pid)
+           kill -2 $(cat /var/run/wsl-vpnkit.pid)
            echo "wsl-vpnkit stopped"
         else
            echo "wsl-vpnkit is not running"
+           /usr/bin/pkill -f vpnkit > /dev/null  2>&1 || true
         fi
         ;;
     status)
