@@ -33,7 +33,7 @@ do_status () {
 case "$1" in
     start|"")
         kill -2 $(cat /var/run/wsl-vpnkit.pid >/dev/null 2>&1) > /dev/null  2>&1 || true
-        /sbin/wsl-vpnkit &
+        VPNKIT_PATH="$VPNKIT_PATH" /sbin/wsl-vpnkit >>/var/log/wsl-vpnkit 2>&1 &
         WSL_VPNKIT_PID=$!
         echo "${WSL_VPNKIT_PID}" > /var/run/wsl-vpnkit.pid
         ;;
