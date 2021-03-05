@@ -7,7 +7,7 @@ Because WSL2 and Entreprise Cisco AnyConnect Sercure Mobility Client with 2FA
 - No admin permissions requiered
 - No Docker Desktop installation requiered (needed binairies in repo)
 
-From WSL, without active Cisco AnyConnect VPN connexion, execute:
+From WSL, **after fresh windows boot** and without active Cisco AnyConnect VPN connexion, execute:
 ```bash
 curl https://raw.githubusercontent.com/mbl-35/wsl-vpnkit/main/install.sh | bash
 ```
@@ -36,7 +36,7 @@ chmod u+x install.sh
             - wsl-vpnkit        (downloded from jsakai135/wsl-vpnkit)
 ```
 
-> Note: Windows Binaries have been directly extracted from Docker Desktop (method explain by sakai135)
+> Note: Windows binaries have been directly extracted from Docker Desktop version 2.3.0.3(45519) - method explain by sakai135
 
 ## Thanks to:
 
