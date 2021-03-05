@@ -141,14 +141,13 @@ EOL
 step "Start WSL Services"
 
 info "Starting dns-sync service..."
-service dns-sync status| grep -q 'dns-sync is not running' && \
-    sudo service dns-sync start || \
-    sudo service dns-sync restart
+service dns-sync status | grep -q 'dns-sync is not running' || sudo service dns-sync stop
+sudo service dns-sync start
 
 info "Starting wsl-vpnkit service..."
-service wsl-vpnkit status| grep -q 'wsl-vpnkit is not running' && \
-    sudo service wsl-vpnkit start || \
-    sudo service wsl-vpnkit restart
+service wsl-vpnkit status| grep -q 'wsl-vpnkit is not running' || sudo service wsl-vpnkit stop
+sudo service wsl-vpnkit start
+    
 
 
 step "Done"
