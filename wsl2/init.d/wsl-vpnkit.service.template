@@ -1,0 +1,62 @@
+#!/bin/bash
+### BEGIN INIT INFO
+# Provides:          wsl-vpnkit
+# Required-Start:
+# Required-Stop:
+# Default-Start:     S
+# Default-Stop:
+# Short-Description: Provide network connectivity to the WSL2
+### END INIT INFO
+
+PATH=/sbin:/bin
+VPNKIT_PATH="{{VPNKIT_PATH}}"
+
+. /lib/init/vars.sh
+. /lib/lsb/init-functions
+
+do_status () {
+    PID=$(cat /var/run/wsl-vpnkit.pid 2>/dev/null)
+    if [ "$PID" == "" ]; then
+        echo "wsl-vpnkit is not running"
+        return
+    fi
+
+    if ps -p $PID > /dev/null
+    then
+        echo "wsl-vpnkit is running"
+    else
+        echo "wsl-vpnkit is not running"
+    fi
+}
+
+
+case "$1" in
+    start|"")
+        kill $(cat /var/run/wsl-vpnkit.pid >/dev/null 2>&1) > /dev/null  2>&1 || true
+        /sbin/wsl-vpnkit &
+        WSL_VPNKIT_PID=$!
+        echo "${WSL_VPNKIT_PID}" > /var/run/wsl-vpnkit.pid
+        ;;
+    restart|reload|force-reload)
+        echo "Error: argument '$1' not supported" >&2
+        exit 3
+        ;;
+    stop)
+        PID=$(cat /var/run/wsl-vpnkit.pid)
+        if ps -p $PID > /dev/null
+        then
+           kill -9 $(cat /var/run/wsl-vpnkit.pid)
+           echo "wsl-vpnkit stopped"
+        else
+           echo "wsl-vpnkit is not running"
+        fi
+        ;;
+    status)
+        do_status
+        exit $?
+        ;;
+    *)
+        echo "Usage: wsl-vpnkit [start|stop]" >&2
+        exit 3
+        ;;
+esac

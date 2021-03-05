@@ -1,0 +1,4 @@
+
+/win/bin/npiperelay*
+/wsl2/sbin/wsl-vpnkit
+/wsl2/init.d/dns-sync
