@@ -66,19 +66,21 @@ step "Install WSL VPNKIT"
 
 which socat >/dev/null || { info "Installing socat... "; sudo apt-get install -y socat; }
 
-info "Setting /sbin/vpnkit-tap-vsockd ..."
-sudo cp -f $VPNKIT_INSTAL_PATH/wsl2/sbin/vpnkit-tap-vsockd /sbin/vpnkit-tap-vsockd
-sudo chmod +x /sbin/vpnkit-tap-vsockd
-sudo chown root:root /sbin/vpnkit-tap-vsockd
+info "Setting /sbin/wsl-vpnkit-tap-vsockd ..."
+sudo cp -f $VPNKIT_INSTAL_PATH/wsl2/sbin/vpnkit-tap-vsockd /sbin/wsl-vpnkit-tap-vsockd
+sudo chmod +x /sbin/wsl-vpnkit-tap-vsockd
+sudo chown root:root /sbin/wsl-vpnkit-tap-vsockd
 
 info "Setting /sbin/wsl-vpnkit ..."
 sudo cp -f $VPNKIT_INSTAL_PATH/wsl2/sbin/wsl-vpnkit /sbin/wsl-vpnkit
+sudo sed -i 's#npiperelay.exe#/sbin/wsl-vpnkit-npiperelay#' /sbin/wsl-vpnkit
+sudo sed -i 's# vpnkit-tap-vsockd# /sbin/wsl-vpnkit-tap-vsockd#' /sbin/wsl-vpnkit
 sudo chmod +x /sbin/wsl-vpnkit
 sudo chown root:root /sbin/wsl-vpnkit
 
-info "Linking npiperelay ..."
-[ -L /usr/local/bin/npiperelay.exe ] && sudo unlink /usr/local/bin/npiperelay.exe
-sudo ln -s $VPNKIT_INSTAL_PATH/npiperelay.exe /usr/local/bin/npiperelay.exe
+info "Linking /sbin/wsl-npiperelay ..."
+[ -L /sbin/wsl-vpnkit-npiperelay ] && sudo unlink /sbin/wsl-vpnkit-npiperelay
+sudo ln -s $VPNKIT_INSTAL_PATH/win/bin/npiperelay-$NPIPERELAY_VERSION.exe /sbin/wsl-vpnkit-npiperelay
 
 info "Setting wsl-vpnkit service ..."
 sudo cp -f $VPNKIT_INSTAL_PATH/wsl2/init.d/wsl-vpnkit.service.template /etc/init.d/wsl-vpnkit
@@ -147,88 +149,6 @@ info "Starting wsl-vpnkit service..."
 service wsl-vpnkit status| grep -q 'wsl-vpnkit is not running' && \
     sudo service wsl-vpnkit start || \
     sudo service wsl-vpnkit restart
+
+
 step "Done"
-
-
-# VPNKIT_PATH=$VPNKIT_INSTAL_PATH/vpnkit.exe
-
-
-
-# info "Install dependencies"
-# sudo apt install -y unzip socat
-
-# [ -d "$VPNKIT_INSTAL_PATH" ] || {
-#     info "Create windows install dir: $VPNKIT_INSTAL_PATH"
-#     mkdir -p "$VPNKIT_INSTAL_PATH"
-# }
-
-# [ -f "$VPNKIT_PATH" ]  || {
-#     [ -f "$DIR/bin/vpnkit.exe" ] && {
-#         info "Install vpnkit.exe from local git repo..."
-#         cp $DIR/bin/vpnkit.exe "$VPNKIT_PATH"
-#     } || {
-#         info "Install vpnkit.exe..."
-#         wget $GITHUB_RAW_BASE/bin/vpnkit.exe -o "$VPNKIT_PATH"
-#     }
-# } 
-
-# [ -f /sbin/vpnkit-tap-vsockd] || {
-#     [ -f "$DIR/bin/vpnkit-tap-vsockd" ] && {
-#         info "Install vpnkit-tap-vsockd from local git repo..."
-#         sudo cp "$DIR/bin/vpnkit-tap-vsockd" /sbin/vpnkit-tap-vsockd
-#     } || {
-#         info "Install vpnkit-tap-vsockd..."
-#         wget $GITHUB_RAW_BASE/bin/vpnkit-tap-vsockd
-#         sudo mv vpnkit-tap-vsockd /sbin/vpnkit-tap-vsockd
-#     }
-#     chmod +x /sbin/vpnkit-tap-vsockd && \    
-#     sudo chown root:root /sbin/vpnkit-tap-vsockd
-# }
-
-# [ -f /sbin/wsl-vpnkit ] || {
-#     info "Install sakai135 wsl-script..."
-#     wget https://raw.githubusercontent.com/sakai135/wsl-vpnkit/main/wsl-vpnkit && \
-#         chmod +x wsl-vpnkit && \
-#         sudo mv vpnkit-tap-vsockd /sbin/wsl-vpnkit && \
-#         sudo chown root:root /sbin/wsl-vpnkit
-# }
-
-# [ -f /usr/local/bin/npiperelay.exe ] || {
-#     info "Install npiperelay.exe..."
-#     wget https://github.com/jstarks/npiperelay/releases/download/v0.1.0/npiperelay_windows_amd64.zip && \
-#     unzip npiperelay_windows_amd64.zip npiperelay.exe && \
-#     rm npiperelay_windows_amd64.zip && \
-#     mv npiperelay.exe $VPNKIT_INSTAL_PATH/
-#     sudo ln -s $VPNKIT_INSTAL_PATH/npiperelay.exe /usr/local/bin/npiperelay.exe
-# }
-
-
-# [ -f /etc/init.d/dns-sync ] || {
-#     info "Install matthiassb DNS-SYNC service..."
-#     wget https://gist.githubusercontent.com/matthiassb/9c8162d2564777a70e3ae3cbee7d2e95/raw/56640fbb50ec870d2a2f62b1f188081c29d45337/dns-sync.sh
-#     chmod +x dns-sync.sh
-#     sudo mv dns-sync.sh /etc/init.d/dns-sync
-#     sudo unlink /etc/resolv.conf
-#     sudo service dns-sync start
-# }
-
-# [ -f /etc/sudoers.d/dns-sync ] || {
-#     info "Allow DNS-SYNC service control to anyone..."
-#     info '%sudo   ALL=(ALL) NOPASSWD: /usr/sbin/service dns-sync *' | sudo tee /etc/sudoers.d/dns-sync
-#     sudo chmod 0440 /etc/sudoers.d/dns-sync
-# }
-
-# # Autostart services (https://gist.github.com/matthiassb/9c8162d2564777a70e3ae3cbee7d2e95#gistcomment-3464922)
-# => info dans le .bashrc de l'utilisateur
-# if service dns-sync status| grep -q 'dns-sync is not running'; then
-#    sudo service dns-sync start
-# fi
-
-# => créer un service pour wsl-vpnkit
-# => permettre à tous de controler ce service
-
-# info "Disable WSL from generating and overwriting /etc/resolv.conf"
-# sudo tee /etc/wsl.conf <<EOL
-# [network]
-# generateResolvConf = false
-# EOL
