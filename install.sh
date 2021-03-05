@@ -104,7 +104,7 @@ EOL
 step "Install WSL SYN-SYNC"
 info "Setting dns-sync service ..."
 sudo cp -f $VPNKIT_INSTAL_PATH/wsl2/init.d/dns-sync /etc/init.d/dns-sync
-chmod +x /etc/init.d/dns-sync
+sudo chmod +x /etc/init.d/dns-sync
 
 info "Setting dns-sync sudoers permissions ..."
 [ -f /etc/sudoers.d/dns-sync ] || {
