@@ -8,7 +8,6 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 GITHUB_REPO=${GITHUB_REPO:-https://github.com/mbl-35/wsl-vpnkit.git}    # Github source repo
 VPNKIT_INSTAL_PATH=${VPNKIT_INSTAL_PATH:-/mnt/c/wsl-vpnkit}             # Windows installation (wsl path)
-VPNKIT_PATH="$(wslpath -m $VPNKIT_INSTAL_PATH/win/bin/vpnkit.exe)"
 NPIPERELAY_VERSION="0.1.0"
 
 step (){ echo -e "\033[0;32m== $1 ==\033[0m"; }
@@ -83,7 +82,8 @@ sudo ln -s $VPNKIT_INSTAL_PATH/npiperelay.exe /usr/local/bin/npiperelay.exe
 
 info "Setting wsl-vpnkit service ..."
 sudo cp -f $VPNKIT_INSTAL_PATH/wsl2/init.d/wsl-vpnkit.service.template /etc/init.d/wsl-vpnkit
-sudo sed -i 's@{{VPNKIT_PATH}}@'"$VPNKIT_PATH"'@' /etc/init.d/wsl-vpnkit
+vpnkit_path="$(wslpath -m $VPNKIT_INSTAL_PATH/win/bin/vpnkit.exe)"
+sudo sed -i 's@{{VPNKIT_PATH}}@'"$vpnkit_path"'@' /etc/init.d/wsl-vpnkit
 sudo chmod +x /etc/init.d/wsl-vpnkit
 
 info "Setting wsl-vpnkit sudoers permissions ..."
