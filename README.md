@@ -9,8 +9,9 @@ Because WSL2 and Entreprise Cisco AnyConnect Sercure Mobility Client with 2FA
 
 From WSL, **after fresh windows boot** and without active Cisco AnyConnect VPN connexion, execute:
 ```bash
-curl https://raw.githubusercontent.com/mbl-35/wsl-vpnkit/main/vpnkit
-vpnkit --install-all
+wget https://raw.githubusercontent.com/mbl-35/wsl-vpnkit/main/vpnkit
+chmod u+x vpnkit
+./vpnkit --install-all
 ```
 
 Or clone:
