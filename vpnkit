@@ -1,0 +1,590 @@
+#!/bin/bash
+# Checked with : https://www.shellcheck.net/ 
+#------------------------------------------------------------------------------
+# one script to manage wsl-vpnkit 
+# Must have network connexion to download et install
+#------------------------------------------------------------------------------
+
+version="1.0.0"
+powershell=/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe
+
+vpnkit_winrc_path=${vpnkit_winrc_path:-/mnt/c/wsl-tools/vpnkit}
+docker_desktop_installer_exe=${vpnkit_winrc_path}/docker-desktop/DockerDesktopInstaller.exe
+vpnkit_exe=${vpnkit_winrc_path}/docker-desktop/wsl-vpnkit.exe
+vpnkit_tap_vsockd_bin=${vpnkit_winrc_path}/docker-desktop/vpnkit-tap-vsockd
+vpnkit_self=${vpnkit_winrc_path}/vpnkit
+vpnkit_shell=${vpnkit_winrc_path}/wsl-vpnkit/wsl-vpnkit.sh
+vpnkit_service=${vpnkit_winrc_path}/wsl-vpnkit/wsl-vpnkit.service
+vpnkit_config=${vpnkit_winrc_path}/wsl-vpnkit/wsl-vpnkit.conf
+vpnkit_master_config=${vpnkit_winrc_path}/wsl-vpnkit/master.conf
+vpnkit_resolv_conf=${vpnkit_winrc_path}/wsl-vpnkit/resolv.conf
+npiperelay_exe=${vpnkit_winrc_path}/npiperelay.exe
+
+# mutual config
+wsl_vpnkit_name=wsl-vpnkit
+wsl_vpnkit_shell=$vpnkit_shell
+wsl_vpnkit_exe=$vpnkit_exe
+wsl_vpnkit_config=$vpnkit_config
+wsl_vpnkit_service=$vpnkit_service
+wsl_vpnkit_master_config=$vpnkit_master_config
+wsl_vpnkit_sudoers=/etc/sudoers.d/$wsl_vpnkit_name
+wsl_vpnkit_tap_vsockd_bin=$vpnkit_tap_vsockd_bin
+wsl_npiperelay_exe=$npiperelay_exe
+
+wsl_autostart_name=wsl-initd
+wsl_autostart_config=/etc/$wsl_autostart_name.conf
+wsl_init_distro_name=/lib/init/wsl-distro-name.sh
+wsl_need_restart=false
+
+# On Ubuntu Distrib, default user has uid=1000,gid=1000
+wsl_uid=1000
+wsl_gid=1000
+#------------------------------------------------------------------------------
+
+help () {
+    echo
+    echo "Usage: $(basename "$0") <command>"
+    echo "Commands: "
+    echo "   -d,--download:    Download external ressources to the windows target directory"
+    echo "   -e,--extract:     Extract docker-desktop utilities"
+    echo "   -h,--help:        This informations"
+    echo "   -i,--install:     Install component to the current WSL distribution"
+    echo "   -r,--reconfigure: Reconfigure current distribution"
+    echo "   -D,--dnsinfo:     Prints Windows DNS informations"
+    echo "   -v,--version:     Display my version"
+    echo 
+}
+
+version () { echo "v$version" ; }
+step (){ echo -e "\033[0;32m== $1 ==\033[0m"; }
+info (){ echo -e "\033[1;33m=> $1\033[0m"; }
+need_root () { [ "$EUID" -eq 0 ] || { echo "Please restart with sudo";  exit $?; } ;}
+win_mkdirs () { mkdir -p "$(dirname "$docker_desktop_installer_exe")" "$(dirname "$vpnkit_shell")" ;}
+
+#------------------------------------------------------------------------------
+# Get nameservers ans search from via Powershell
+#
+do_dns_info () {
+    
+    local tmp_file
+    local nameservers
+    local search_domains
+    
+    tmp_file="$(mktemp)"
+    $powershell -Command "Get-DnsClientServerAddress -AddressFamily IPv4 | \
+                Select-Object -ExpandProperty ServerAddresses" > "$tmp_file"
+        # Remove duplicates
+    /usr/bin/awk '!x[$0]++' "$tmp_file" > "$tmp_file".2
+    IFS=$'\r\n' GLOBIGNORE='*' command eval  'nameservers=($(cat $tmp_file.2))'
+    rm -f "$tmp_file" "$tmp_file".2
+
+    # Retrive search domains via powershell
+    IFS=$'\r\n' GLOBIGNORE='*' command eval \
+        'search_domains=($($powershell -Command "Get-DnsClientGlobalSetting |
+            Select-Object -ExpandProperty SuffixSearchList"))'
+
+    mapfile -t search_domains < <(/usr/bin/tr ' ' '\n' <<< "${search_domains[@]}" | \
+        /usr/bin/sort -u | /usr/bin/tr '\n' ' ')
+    printf 'nameserver %s\n' "${nameservers[@]}"
+   [ ${#search_domains[@]} -eq 0 ] || printf "search %s\n" "${search_domains[*]}"
+}
+
+do_win_permissions () {
+    info "Set Permissions on $vpnkit_winrc_path"
+    [ -f "$vpnkit_exe" ] && chmod 0755 "$vpnkit_exe"
+    [ -f "$vpnkit_tap_vsockd_bin" ] && chmod 0755 "$vpnkit_tap_vsockd_bin"
+    [ -f "$npiperelay_exe" ] && chmod 0755 "$npiperelay_exe"
+    [ -f "$vpnkit_config" ] && chmod 0644 "$vpnkit_config"
+    [ -f "$vpnkit_shell" ] && chmod 0755 "$vpnkit_shell"
+    [ -f "$vpnkit_service" ] && chmod 0755 "$vpnkit_service"
+    [ -f "$vpnkit_resolv_conf" ] && chmod 0644 "$vpnkit_resolv_conf"
+    [ -f "$vpnkit_self" ] && chmod 0755 "$vpnkit_self"
+    [ "$EUID" -ne 0 ] || chown -R $wsl_uid:$wsl_gid "$vpnkit_winrc_path"
+}
+
+#------------------------------------------------------------------------------
+# Downloads all packages from internet to the windows space
+#
+do_download_docker_desktop_installer (){
+    [ -f "$vpnkit_exe" ] && [ -f "$vpnkit_tap_vsockd_bin" ] && \
+        info "vpnkit.exe [OK]" && info "vpnkit_tap_vsockd [OK]" || {
+        [ -f "$docker_desktop_installer_exe" ] && info "Docker Desktop Installer.exe [OK]" || {
+            info 'Download Docker Desktop Installer.exe'
+            wget https://desktop.docker.com/win/stable/amd64/Docker%20Desktop%20Installer.exe \
+                -O "$docker_desktop_installer_exe"
+        }
+
+        info 'Extract files'
+        which p7zip >/dev/null && which genisoimage >/dev/null || \
+            sudo apt install -y p7zip genisoimage
+        7zr e "$docker_desktop_installer_exe" \
+            resources/vpnkit.exe \
+            resources/wsl/docker-for-wsl.iso
+        isoinfo -i docker-for-wsl.iso -R \
+            -x /containers/services/vpnkit-tap-vsockd/lower/sbin/vpnkit-tap-vsockd \
+            > ./vpnkit-tap-vsockd
+        mv vpnkit.exe "$vpnkit_exe"
+        mv vpnkit-tap-vsockd "$vpnkit_tap_vsockd_bin"
+        rm docker-for-wsl.iso
+    }
+}
+
+do_download_npiperelay () {
+   [ -f "$npiperelay_exe" ] && info "npiperelay.exe [OK]" || {
+        info 'Download npiperelay_windows_amd64 package'
+        wget https://github.com/jstarks/npiperelay/releases/download/v0.1.0/npiperelay_windows_amd64.zip
+        info 'Extract files'
+        which unzip >/dev/null || sudo apt install -y unzip
+        unzip npiperelay_windows_amd64.zip npiperelay.exe
+        mv npiperelay.exe "$npiperelay_exe"
+        rm npiperelay_windows_amd64.zip
+    }
+}
+
+do_download () {
+    need_root
+    step "Download"
+    win_mkdirs
+    do_download_docker_desktop_installer
+    do_download_npiperelay
+    do_win_permissions
+}
+
+#------------------------------------------------------------------------------
+# Generate WSL script, service and initial configuration
+#
+do_reconfigure_self_store () {
+    [ -f "$vpnkit_self" ] && info "Self [OK]" || {
+        info "Save myself to $vpnkit_self"
+        cp "$0" "$vpnkit_self"
+    }
+}
+
+do_reconfigure_vpnkit_config () {
+    info "Generate $vpnkit_config"
+        cat > "$vpnkit_config" <<EOL
+# Path to the windows executables
+VPNKIT_PATH=$wsl_vpnkit_exe
+VPNKIT_NPIPERELAY_PATH=$wsl_npiperelay_exe
+
+# Network properties
+TAP_NAME=eth1
+PIPE_PATH="//./pipe/wsl-vpnkit"
+VPNKIT_BACKLOG="32"
+VPNKIT_GATEWAY_IP="192.168.67.1"
+VPNKIT_HOST_IP="192.168.67.2"
+VPNKIT_LOWEST_IP="192.168.67.3"
+VPNKIT_HIGHEST_IP="192.168.67.14"
+
+# Script, pid and log paths
+WSLVPNKIT_PATH=$wsl_vpnkit_shell
+SOCKET_PATH=/var/run/wsl-vpnkit.sock
+PID_PATH=/var/run/wsl-vpnkit.pid
+LOG_PATH=/var/log/wsl-vpnkit.log
+EOL
+}
+
+
+do_reconfigure_vpnkit_script () {
+    info "Generate $vpnkit_shell"
+    cat > "$vpnkit_shell" <<EOL
+#!/bin/sh
+
+# load configuration
+. $wsl_vpnkit_config
+
+IP_ROUTE=
+RESOLV_CONF=
+
+relay () {
+    local OS_CODENAME="\$(lsb_release --codename | cut -f2)"
+    local OPTIONS="fork,umask=007"
+
+    # option umask not working on ubuntu-14...
+    case "\$OS_CODENAME" in
+        trusty) OPTIONS="fork" ;;
+    esac
+
+    socat UNIX-LISTEN:\$SOCKET_PATH,\$OPTIONS EXEC:"\$VPNKIT_NPIPERELAY_PATH -ep -s \$PIPE_PATH",nofork
+}
+
+vpnkit () {
+    WIN_PIPE_PATH=\$(echo \$PIPE_PATH | sed -e 's:/:\\\\:g')
+    CMD='"\$VPNKIT_PATH" \\
+        --ethernet \$WIN_PIPE_PATH \\
+        --listen-backlog \$VPNKIT_BACKLOG \\
+        --gateway-ip \$VPNKIT_GATEWAY_IP \\
+        --host-ip \$VPNKIT_HOST_IP \\
+        --lowest-ip \$VPNKIT_LOWEST_IP \\
+        --highest-ip \$VPNKIT_HIGHEST_IP \\
+    '
+    if [ "\$VPNKIT_HTTP_CONFIG" ]; then
+        CMD="\$CMD"' --http "\$VPNKIT_HTTP_CONFIG"'
+    fi
+    if [ "\$VPNKIT_GATEWAY_FORWARD_CONFIG" ]; then
+        CMD="\$CMD"' --gateway-forwards "\$VPNKIT_GATEWAY_FORWARD_CONFIG"'
+    fi
+    if [ "\$VPNKIT_DEBUG" ]; then
+        CMD="\$CMD"' --debug'
+    fi
+    eval "\$CMD"
+}
+
+tap () {
+    $wsl_vpnkit_tap_vsockd_bin --tap \$TAP_NAME --path \$SOCKET_PATH
+}
+
+ipconfig () {
+    ip a add \$VPNKIT_LOWEST_IP/255.255.255.0 dev \$TAP_NAME
+    ip link set dev \$TAP_NAME up
+    IP_ROUTE=\$(ip route | grep default)
+    ip route del \$IP_ROUTE
+    ip route add default via \$VPNKIT_GATEWAY_IP dev \$TAP_NAME
+    RESOLV_CONF=\$(cat /etc/resolv.conf)
+    echo "nameserver \$VPNKIT_GATEWAY_IP" > /etc/resolv.conf
+}
+
+close () {
+    ip link set dev \$TAP_NAME down
+    ip route add $IP_ROUTE
+    echo "\$RESOLV_CONF" > /etc/resolv.conf
+    # prevent wsl-vpnkit.sock: Address already in use
+    [ -S \$SOCKET_PATH ] && rm -f \$SOCKET_PATH
+    kill 0
+}
+
+if [ \${EUID:-\$(id -u)} -ne 0 ]; then
+    echo "Please run this script as root"
+    exit 1
+fi
+
+relay &
+sleep 3
+vpnkit &
+sleep 3
+tap &
+sleep 3
+ipconfig
+
+trap close exit
+trap exit int term
+wait
+EOL
+}
+
+do_reconfigure_vpnkit_service () {
+    info "Generate $vpnkit_service"
+    cat > "$vpnkit_service" <<EOL
+#!/bin/sh
+
+# load configuration
+. $wsl_vpnkit_config
+[ -f $wsl_vpnkit_master_config ] && . $wsl_vpnkit_master_config
+. $wsl_init_distro_name
+
+cmd="/sbin/start-stop-daemon --startas /bin/sh --make-pidfile --pidfile \$PID_PATH"
+ret=0
+
+check_master() {
+    [ ! -n "\$WSLVPNKIT_MASTER" ] || {
+        [ "\$WSLVPNKIT_MASTER" = "\$WSL_DISTRO_NAME" ] || {
+            echo "Master set to \$WSLVPNKIT_MASTER - Service not resquired here (\$WSL_DISTRO_NAME)"  | tee -a \$LOG_PATH
+        exit 0
+        }
+    }
+}
+
+start() {
+    check_master
+    echo "wsl-vpnkit starts at \$(date)" >> \$LOG_PATH
+    # using 'wsl.exe' allows the daemon to keep running in the background even when you close your terminal
+    #/mnt/c/WINDOWS/system32/wsl.exe --distribution \$WSL_DISTRO_NAME --user \$(whoami) -- \$cmd --oknodo --background --start -- -c "exec \$WSLVPNKIT_PATH >> \$LOG_PATH 2>&1"
+    \$cmd --background --no-close --start -- -c "exec \$WSLVPNKIT_PATH >> \$LOG_PATH 2>&1"
+    ret=\$?
+    [ \$ret -eq 0 ] && { 
+        echo "Setting master to: \$WSL_DISTRO_NAME"
+        echo "WSLVPNKIT_MASTER=\$WSL_DISTRO_NAME" > $wsl_vpnkit_master_config 
+        } || \\
+        echo "Prematurely Stopped at \$(date) - code \$ret" >> \$LOG_PATH
+}
+
+stop() {
+    check_master
+    \$cmd --oknodo --stop
+    ret=\$?
+    [ -f \$PID_PATH ] && rm -f \$PID_PATH
+    [ -f $wsl_vpnkit_master_config ] && rm -f $wsl_vpnkit_master_config
+    echo "Stopped at \$(date)" >> \$LOG_PATH
+}
+
+status() {
+    check_master
+    \$cmd --status
+    ret=\$?
+    case "\$ret" in
+        0) echo "$wsl_vpnkit_name is running." ;;
+        1) echo "$wsl_vpnkit_name is not running and the pid file exists." ;;
+        3) echo "$wsl_vpnkit_name is not running." ;;
+        4) echo "Unable to determine program $wsl_vpnkit_name status." ;;
+    esac
+}
+
+case "\$1" in
+    start)      start ;;
+    stop)       stop ;;
+    status)     status ;;
+    restart)    stop; start ;;
+    *)          echo "Usage: wsl-vpnkit {start|stop|restart|status}"
+                exit 1
+esac
+exit \$ret    
+EOL
+}
+
+do_reconfigure_default_resolv_config () {
+    # default resolv.conf
+    [ -f "$vpnkit_resolv_conf" ] && info "Default $vpnkit_resolv_conf [SKIPPED]" || {
+        info "Creating $vpnkit_resolv_conf"
+        echo 'nameserver 8.8.8.8' | sudo tee "$vpnkit_resolv_conf"
+    }
+}
+
+do_reconfigure () {
+    step "Reconfigure"
+    win_mkdirs
+    do_reconfigure_self_store
+    do_reconfigure_vpnkit_config
+    do_reconfigure_vpnkit_script
+    do_reconfigure_vpnkit_service
+    do_reconfigure_default_resolv_config
+    do_win_permissions
+}
+
+#------------------------------------------------------------------------------
+# Soft clean (generated files) and hard clean (all files store in windows)
+# Note: hard clean do not check if the service is running or not.
+#       resolv.conf file in wsl's instances would be break !
+do_clean () {
+    [ -f "$vpnkit_config" ] && rm -f "$vpnkit_config"
+    [ -f "$vpnkit_shell" ] && rm -f "$vpnkit_shell"
+    [ -f "$vpnkit_service" ] && rm -f "$vpnkit_service"
+    [ -f "$vpnkit_resolv_conf" ] && rm -f "$vpnkit_resolv_conf"
+}
+
+do_clean_all () {
+    step "Clean All files on windows"
+    rm -rf "$vpnkit_winrc_path"
+}
+
+#------------------------------------------------------------------------------
+# Install parts on WSL
+
+do_install_prerequisites () {
+    [ -f "$npiperelay_exe" ] &&[ -f "$vpnkit_tap_vsockd_bin" ] &&[ -f "$vpnkit_exe" ] || {
+        echo "ERROR: $(basename "$0") need dependencies. You should call it first with option --download"
+        exit 1
+    }
+    [ -f "$vpnkit_config" ] && [ -f "$vpnkit_shell" ] && [ -f "$vpnkit_service" ] && [ -f "$vpnkit_resolv_conf" ] || {
+        echo "ERROR: $(basename "$0") has to be configured first with option --reconfigure"
+        exit 1
+    }
+}
+
+do_install_dependencies () {     
+    which socat >/dev/null && info "socat [OK]" || {
+        info 'Install socat' 
+        apt install -y socat
+    }
+
+    which crudini >/dev/null && info "crudini [OK]" || {
+        info "Install crudini"
+        apt install -y crudini
+    }
+}
+
+do_install_init_distro_name () {
+    # WSL Dynamic Service Environement variables
+    [ -f $wsl_init_distro_name ] && \
+        info "Update $wsl_init_distro_name" || \
+        info "Create $wsl_init_distro_name"
+    echo "WSL_DISTRO_NAME=$WSL_DISTRO_NAME" > $wsl_init_distro_name
+}
+
+do_install_wslkit_sudoers () {
+    # Sudoers
+    [ -f $wsl_vpnkit_sudoers ] && info "$wsl_vpnkit_sudoers [OK]" || {
+        info "Create $wsl_vpnkit_sudoers"
+        printf '%%sudo  ALL=(ALL) NOPASSWD: /usr/sbin/service %s *\n' "$wsl_vpnkit_name" > $wsl_vpnkit_sudoers
+        chmod 0440 $wsl_vpnkit_sudoers
+    }
+}
+
+do_uninstall_wslkit_sudoers () {
+    # Sudoers
+    [ ! -f $wsl_vpnkit_sudoers ] && info "$wsl_vpnkit_sudoers [OK]" || {
+        info "Delete $wsl_vpnkit_sudoers"
+        rm -f $wsl_vpnkit_sudoers
+    }
+}
+
+do_install_disable_generateResolvConf () {
+    # Set generateResolvConf : false
+    [ -f /etc/wsl.conf ] && info "/etc/wsl.conf [OK]" || {
+        info "Create /etc/wsl.conf"
+        touch /etc/wsl.conf
+    }
+    [[ "$(crudini --get /etc/wsl.conf network generateResolvConf 2>/dev/null)" = "false" ]] && \
+        info "generateResolvConf = false [OK]" || {
+            info "Set generateResolvConf = false"
+            crudini --set /etc/wsl.conf network generateResolvConf false
+            wsl_need_restart=true
+            info "!!! REQUIRED WSL RESTART !!!"
+    }
+}
+
+do_uninstall_disable_generateResolvConf(){
+    # Set generateResolvConf : true
+    [ -f /etc/wsl.conf ] && info "/etc/wsl.conf [OK]" || {
+        info "Create /etc/wsl.conf"
+        touch /etc/wsl.conf
+    }
+    [[ "$(crudini --get /etc/wsl.conf network generateResolvConf 2>/dev/null)" = "true" ]] && \
+        info "generateResolvConf = true [OK]" || {
+            info "Set generateResolvConf = true"
+            crudini --set /etc/wsl.conf network generateResolvConf true
+            wsl_need_restart=true
+            info "!!! REQUIRED WSL RESTART !!!"
+    }
+}
+
+do_install_link_resolvConf () {
+    # Link to windows wsl-vpnkit-resolv.conf
+    [[ "$(readlink -f /etc/resolv.conf 2>/dev/null)" = "$vpnkit_resolv_conf" ]] && \
+        info "Check /etc/resolv.conf [OK]" || {
+            info "Link resolv.conf to $vpnkit_resolv_conf"
+            [ -L /etc/resolv.conf ] && unlink /etc/resolv.conf
+            [ -f /etc/resolv.conf ] && rm /etc/resolv.conf 
+            ln -s  "$vpnkit_resolv_conf" /etc/resolv.conf
+        }
+}
+
+do_uninstall_link_resolvConf () {
+    # Unlink to windows wsl-vpnkit-resolv.conf
+    [[ "$(readlink -f /etc/resolv.conf 2>/dev/null)" != "$vpnkit_resolv_conf" ]] && \
+        info "Unlink /etc/resolv.conf [SKIPPED]" || {
+            info "Unlink /etc/resolv.conf"
+            unlink /etc/resolv.conf
+        }
+}
+
+do_install_link_vpnkit_service () {
+    # Link init.d service 
+     [[ "$(readlink -f /etc/init.d/$wsl_vpnkit_name 2>/dev/null)" = "$wsl_vpnkit_service" ]] && \
+        info "Check /etc/init.d/$wsl_vpnkit_name [OK]" || {
+        [ -L /etc/init.d/$wsl_vpnkit_name ] && unlink /etc/init.d/$wsl_vpnkit_name
+        [ -f /etc/init.d/$wsl_vpnkit_name ] && rm /etc/init.d/$wsl_vpnkit_name
+        ln -s "$wsl_vpnkit_service" /etc/init.d/$wsl_vpnkit_name
+    }
+}
+do_uninstall_link_vpnkit_service() {
+    [ ! -L /etc/init.d/$wsl_vpnkit_name ] && info "$wsl_vpnkit_name service [UNINSTALLED]" || {
+        info "Remove  wsl_vpnkit_name"
+        unlink /etc/init.d/$wsl_vpnkit_name
+    }
+}
+
+do_install_setup_autostart () {
+    # Setup autostart if exists
+    [ ! -f $wsl_autostart_config ] && info "Skip autostart" || {
+        crudini --set $wsl_autostart_config servcices $wsl_vpnkit_name true
+    }
+}
+do_uninstall_setup_autostart () {
+    # Setup autostart if exists
+    [ ! -f $wsl_autostart_config ] && info "Skip autostart" || {
+        crudini --del $wsl_autostart_config servcices $wsl_vpnkit_name
+    }
+}
+
+do_wsl_distrib_check_restart_needed() {
+    ! $wsl_need_restart && \
+        info "No WSL restart needed" || {
+            info "Restarting WSL..."
+            /mnt/c/WINDOWS/system32/wsl.exe --terminate "$WSL_DISTRO_NAME"
+        }
+}
+
+do_install () {
+    need_root
+    step "Install"
+    do_install_prerequisites
+    do_install_dependencies
+    do_install_init_distro_name
+    do_install_wslkit_sudoers
+    do_install_disable_generateResolvConf
+    do_install_link_resolvConf
+    do_install_link_vpnkit_service
+    do_install_setup_autostart
+    do_wsl_distrib_check_restart_needed
+    do_start_service
+}
+
+do_uninstall () {
+    need_root
+    step "Uninstall"
+    do_stop_service
+    do_uninstall_setup_autostart
+    do_uninstall_link_vpnkit_service
+    do_uninstall_link_resolvConf
+    do_uninstall_disable_generateResolvConf
+    do_uninstall_wslkit_sudoers
+    do_wsl_distrib_check_restart_needed
+}
+
+
+do_install_all () {
+    do_download
+    do_reconfigure
+    do_install
+}
+
+#------------------------------------------------------------------------------
+do_start_service () { sudo service $wsl_vpnkit_name start ; }
+do_stop_service () { sudo service $wsl_vpnkit_name stop ; }
+do_status_service () { sudo service $wsl_vpnkit_name status ; }
+do_status_all () {
+    echo "------ WIN"
+    for file in $npiperelay_exe  $vpnkit_tap_vsockd_bin $vpnkit_exe $vpnkit_config \
+        $vpnkit_shell $vpnkit_service $vpnkit_resolv_conf $vpnkit_master_config; do
+        [ -f "$file" ] && echo "$(basename "$file"): OK" ||  echo "$(basename "$file"): MISSING"
+    done
+    echo "------ WSL"
+    for file in $wsl_init_distro_name $wsl_autostart_config; do
+        [ -f $file ] && echo "$file: OK" ||  echo "$file: MISSING"
+    done
+    for file in /etc/init.d/$wsl_vpnkit_name /etc/resolv.conf; do
+        [ -L $file ] && echo "$file: OK" ||  echo "$file: NOT LINKED"
+    done
+    echo "------ SERVICE"
+    do_status_service
+}
+
+#------------------------------------------------------------------------------
+action=${1:-help}
+
+case "$action" in
+    -c|--clean) do_clean ;;
+    -C|--clean-all) do_clean_all ;;
+    -d|--download) do_download ;;
+    -r|--reconfigure) do_reconfigure ;;
+    -i|--install) do_install ;;
+    -I|--install-all)  do_install_all ;;
+    -u|--uninstall) ;;
+    -D|--dnsinfo) do_dns_info ;;
+    -s|--status-all) do_status_all ;;
+    start) do_start_service ;;
+    stop) do_stop_service ;;
+    status) do_status_service ;;
+    -v|--version) version ;;
+    *)  help ;;
+esac
