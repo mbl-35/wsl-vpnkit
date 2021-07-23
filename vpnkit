@@ -496,13 +496,13 @@ do_uninstall_link_vpnkit_service() {
 do_install_setup_autostart () {
     # Setup autostart if exists
     [ ! -f $wsl_autostart_config ] && info "Skip autostart" || {
-        crudini --set $wsl_autostart_config servcices $wsl_vpnkit_name true
+        crudini --set $wsl_autostart_config services $wsl_vpnkit_name true
     }
 }
 do_uninstall_setup_autostart () {
     # Setup autostart if exists
     [ ! -f $wsl_autostart_config ] && info "Skip autostart" || {
-        crudini --del $wsl_autostart_config servcices $wsl_vpnkit_name
+        crudini --del $wsl_autostart_config services $wsl_vpnkit_name
     }
 }
 
