@@ -288,7 +288,7 @@ ret=0
 check_master() {
     [ ! -n "\$WSLVPNKIT_MASTER" ] || {
         [ "\$WSLVPNKIT_MASTER" = "\$WSL_DISTRO_NAME" ] || {
-            echo "Master set to \$WSLVPNKIT_MASTER - Service not resquired here (\$WSL_DISTRO_NAME)"  | tee -a \$LOG_PATH
+            echo "Master set to \$WSLVPNKIT_MASTER - Service not required here (\$WSL_DISTRO_NAME)"  | tee -a \$LOG_PATH
         exit 0
         }
     }
