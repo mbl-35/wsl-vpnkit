@@ -280,7 +280,11 @@ do_reconfigure_vpnkit_service () {
 # load configuration
 . $wsl_vpnkit_config
 [ -f $wsl_vpnkit_master_config ] && . $wsl_vpnkit_master_config
-. $wsl_init_distro_name
+[ -f $wsl_init_distro_name ] && . $wsl_init_distro_name
+[ -z "\$WSL_DISTRO_NAME" ] && {
+    echo "WSL_DISTRO_NAME not set in \$wsl_init_distro_name"  | tee -a \$LOG_PATH
+    exit -1
+}
 
 cmd="/sbin/start-stop-daemon --startas /bin/sh --make-pidfile --pidfile \$PID_PATH"
 ret=0
@@ -288,8 +292,15 @@ ret=0
 check_master() {
     [ ! -n "\$WSLVPNKIT_MASTER" ] || {
         [ "\$WSLVPNKIT_MASTER" = "\$WSL_DISTRO_NAME" ] || {
-            echo "Master set to \$WSLVPNKIT_MASTER - Service not required here (\$WSL_DISTRO_NAME)"  | tee -a \$LOG_PATH
-        exit 0
+            # assert Master is Runnind
+            /mnt/c/WINDOWS/system32/wsl.exe -l -v | iconv -f UTF-16LE -t UTF-8 | grep -e " *\$WSLVPNKIT_MASTER *Running"
+            ret=\$?
+            [ \$ret -eq 0 ] && {
+                echo "Master set to \$WSLVPNKIT_MASTER - Service not resquired here (\$WSL_DISTRO_NAME)"  | tee -a \$LOG_PATH
+                exit 0
+            } || {
+                echo "Master set to \$WSLVPNKIT_MASTER but not running. I have the power !"  | tee -a \$LOG_PATH
+            }
         }
     }
 }
@@ -380,7 +391,11 @@ do_clean_all () {
 # Install parts on WSL
 
 do_install_prerequisites () {
-    [ -f "$npiperelay_exe" ] &&[ -f "$vpnkit_tap_vsockd_bin" ] &&[ -f "$vpnkit_exe" ] || {
+    [ -z "$WSL_DISTRO_NAME" ] && {
+        echo "ERROR: $(basename "$0") WSL_DISTRO_NAME env variable missing "
+        exit 1
+    }
+    [ -f "$npiperelay_exe" ] && [ -f "$vpnkit_tap_vsockd_bin" ] && [ -f "$vpnkit_exe" ] || {
         echo "ERROR: $(basename "$0") need dependencies. You should call it first with option --download"
         exit 1
     }
