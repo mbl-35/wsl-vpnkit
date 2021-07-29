@@ -97,7 +97,8 @@ do_dns_info () {
 
 do_restore_routes() {
     # load configuration to TAP_NAME
-    . $wsl_vpnkit_config
+    # shellcheck disable=1090
+    . "$wsl_vpnkit_config"
 	local gateway
     gateway=$($powershell -Command "(Get-NetAdapter 'vEthernet (WSL)' | Get-NetIPAddress -AddressFamily IPv4).IPAddress" | sed 's/[^[:print:]]//')
 	ip link set dev "$TAP_NAME" down
