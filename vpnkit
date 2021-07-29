@@ -411,7 +411,7 @@ gracefull_cleanup(){
 
 restore_routes() {
 	log_action_msg "Restaure routes"
-	gateway=$(\$powershell -Command "(Get-NetAdapter 'vEthernet (WSL)' | Get-NetIPAddress -AddressFamily IPv4).IPAddress" | sed 's/[^[:print:]]//')
+	gateway=\$(\$powershell -Command "(Get-NetAdapter 'vEthernet (WSL)' | Get-NetIPAddress -AddressFamily IPv4).IPAddress" | sed 's/[^[:print:]]//')
 	ip link set dev "\$TAP_NAME" down
 	ip route add default via "\$gateway" dev eth0 2>/dev/null
 	ip route flush cache
