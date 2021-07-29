@@ -61,6 +61,7 @@ help () {
     echo "   -r,--reconfigure: Reconfigure current distribution"
     echo "   -R,--rescue:      Set nameserver, routes from windows informations"
     echo "   -s,--status-all:  Local Installation Status"
+    echo "   -w|--wsl-restart: Restart this WSL distribution instance"
     echo "   start             Start the service"
     echo "   stop              Stop the service"
     echo "   status            Status of the service"
@@ -743,11 +744,20 @@ do_uninstall_setup_autostart () {
     }
 }
 
+do_wsl_distrib_restart() {
+    need_root
+    info "Restarting WSL..."
+    [ -z "$WSL_DISTRO_NAME" ] && {
+        err "Can't get WSL_DISTRO_NAME env value.."
+        exit 100
+    }
+    $wslbin --terminate "$WSL_DISTRO_NAME"
+}
+
 do_wsl_distrib_check_restart_needed() {
     ! $wsl_need_restart && \
         info "No WSL restart needed" || {
-            info "Restarting WSL..."
-            $wslbin --terminate "$WSL_DISTRO_NAME"
+            do_wsl_distrib_restart
         }
 }
 
@@ -763,8 +773,8 @@ do_install () {
     do_install_link_vpnkit_service
     do_install_link_vpnkit
     do_install_setup_autostart
-    do_wsl_distrib_check_restart_needed
-    do_start_service
+    #do_wsl_distrib_check_restart_needed
+    #do_start_service
 }
 
 do_uninstall () {
@@ -778,7 +788,7 @@ do_uninstall () {
     do_uninstall_link_vpnkit
     do_uninstall_disable_generateResolvConf
     do_uninstall_wslkit_sudoers
-    do_wsl_distrib_check_restart_needed
+    #do_wsl_distrib_check_restart_needed
 }
 
 
@@ -823,6 +833,7 @@ case "$action" in
     -D|--dnsinfo) do_dns_info ;;
     -R|--rescue) do_rescue ;;
     -s|--status-all) do_status_all ;;
+    -w|--wsl-restart) do_wsl_distrib_restart ;;
     start) do_start_service ;;
     stop) do_stop_service ;;
     status) do_status_service ;;
