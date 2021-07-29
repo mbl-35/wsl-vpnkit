@@ -94,6 +94,24 @@ do_dns_info () {
    [ ${#search_domains[@]} -eq 0 ] || printf "search %s\n" "${search_domains[*]}"
 }
 
+do_restore_routes() {
+    # load configuration to TAP_NAME
+    . $wsl_vpnkit_config
+	local gateway
+    gateway=$($powershell -Command "(Get-NetAdapter 'vEthernet (WSL)' | Get-NetIPAddress -AddressFamily IPv4).IPAddress" | sed 's/[^[:print:]]//')
+	ip link set dev "$TAP_NAME" down
+	ip route add default via "$gateway" dev eth0 2>/dev/null
+	ip route flush cache
+}
+
+do_rescue() {
+    step "Download"
+    info "Restore dns from windows"
+    do_dns_info > /etc/resolv.conf
+    info "Restore routes"
+    do_restore_routes
+}
+
 do_win_permissions () {
     info "Set Permissions on $vpnkit_winrc_path"
     [ -f "$vpnkit_exe" ] && chmod 0755 "$vpnkit_exe"
@@ -390,6 +408,13 @@ gracefull_cleanup(){
 	fi
 }
 
+restore_routes() {
+	log_action_msg "Restaure routes"
+	gateway=$(\$POWERSHELL -Command "(Get-NetAdapter 'vEthernet (WSL)' | Get-NetIPAddress -AddressFamily IPv4).IPAddress" | sed 's/[^[:print:]]//')
+	ip link set dev "\$TAP_NAME" down
+	ip route add default via "\$gateway" dev eth0 2>/dev/null
+	ip route flush cache
+}
 
 start() {
 	check_init
@@ -446,19 +471,24 @@ stop() {
 		ret=\$?
 		printf '%s  - %s stopped status %s' "\$(date)" "\$service_name" "\$([ \$ret -eq 0 ] && echo 'OK' || echo 'KO')"  >> "\$LOG_PATH"
 	else
-		# stop local daemon in this distribution
-		[ -n "\$WSLVPNKIT_MASTER" ] \\
-			&& log_begin_msg "Stopping \$desc: \$service_name on \$WSLVPNKIT_MASTER" \\
-			|| log_warning_msg "\$desc: already stopped"
+        if ! \$cmd --status ; then
+			log_warning_msg "\$desc: already stopped"
+		else 
+            # stop local daemon in this distribution
+            [ -n "\$WSLVPNKIT_MASTER" ] \\
+                && log_begin_msg "Stopping \$desc: \$service_name on \$WSLVPNKIT_MASTER" \\
+                || log_warning_msg "\$desc: already stopped"
 
-		\$cmd --oknodo --stop >/dev/null
-		ret=\$?
-		[ -f "\$PID_PATH" ] && rm -f "\$PID_PATH"
-		[ -f "\$cfg_master_file" ] && rm -f "\$cfg_master_file"
-		gracefull_cleanup
-		cleanup_windows_process
-
-		log_end_msg \$ret
+            \$cmd --oknodo --stop >/dev/null
+            ret=\$?
+            [ -f "\$PID_PATH" ] && rm -f "\$PID_PATH"
+            [ -f "\$cfg_master_file" ] && rm -f "\$cfg_master_file"
+            gracefull_cleanup
+            cleanup_windows_process
+            restore_routes
+			log_warning_msg "Disconnect VPN to retreive network access"
+            log_end_msg \$ret
+        fi
 	fi
     echo "Stopped at \$(date)" >> "\$LOG_PATH"
 }
@@ -759,6 +789,7 @@ case "$action" in
     -I|--install-all)  do_install_all ;;
     -u|--uninstall) ;;
     -D|--dnsinfo) do_dns_info ;;
+    -R|--rescue) do_rescue ;;
     -s|--status-all) do_status_all ;;
     start) do_start_service ;;
     stop) do_stop_service ;;
