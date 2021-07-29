@@ -23,6 +23,7 @@ npiperelay_exe=${vpnkit_winrc_path}/npiperelay.exe
 
 # mutual config
 wsl_vpnkit_name=wsl-vpnkit
+wsl_vpnkit_self_link=/usr/local/bin/vpnkit
 wsl_vpnkit_shell=$vpnkit_shell
 wsl_vpnkit_exe=$vpnkit_exe
 wsl_vpnkit_config=$vpnkit_config
@@ -687,10 +688,28 @@ do_uninstall_link_resolvConf () {
         }
 }
 
+do_install_link_vpnkit () {
+    # Link init.d service 
+     [[ "$(readlink -f $wsl_vpnkit_self_link 2>/dev/null)" = "$vpnkit_self" ]] && \
+        info "Check $wsl_vpnkit_self_link [OK]" || {
+        info "Link vpnkit to $vpnkit_self"
+        [ -L $wsl_vpnkit_self_link ] && unlink $wsl_vpnkit_self_link
+        [ -f $wsl_vpnkit_self_link ] && rm $wsl_vpnkit_self_link
+        ln -s "$vpnkit_self" $wsl_vpnkit_self_link
+    }
+}
+do_uninstall_link_vpnkit() {
+    [ ! -L $wsl_vpnkit_self_link ] && info "vpnkit script [UNINSTALLED]" || {
+        info "Remove vpnkit link"
+        unlink $wsl_vpnkit_self_link
+    }
+}
+
 do_install_link_vpnkit_service () {
     # Link init.d service 
      [[ "$(readlink -f /etc/init.d/$wsl_vpnkit_name 2>/dev/null)" = "$wsl_vpnkit_service" ]] && \
         info "Check /etc/init.d/$wsl_vpnkit_name [OK]" || {
+        info "Link $wsl_vpnkit_name service to $wsl_vpnkit_service"
         [ -L /etc/init.d/$wsl_vpnkit_name ] && unlink /etc/init.d/$wsl_vpnkit_name
         [ -f /etc/init.d/$wsl_vpnkit_name ] && rm /etc/init.d/$wsl_vpnkit_name
         ln -s "$wsl_vpnkit_service" /etc/init.d/$wsl_vpnkit_name
@@ -698,7 +717,7 @@ do_install_link_vpnkit_service () {
 }
 do_uninstall_link_vpnkit_service() {
     [ ! -L /etc/init.d/$wsl_vpnkit_name ] && info "$wsl_vpnkit_name service [UNINSTALLED]" || {
-        info "Remove  wsl_vpnkit_name"
+        info "Remove $wsl_vpnkit_name service"
         unlink /etc/init.d/$wsl_vpnkit_name
     }
 }
@@ -734,6 +753,7 @@ do_install () {
     do_install_disable_generateResolvConf
     do_install_link_resolvConf
     do_install_link_vpnkit_service
+    do_install_link_vpnkit
     do_install_setup_autostart
     do_wsl_distrib_check_restart_needed
     do_start_service
@@ -746,6 +766,8 @@ do_uninstall () {
     do_uninstall_setup_autostart
     do_uninstall_link_vpnkit_service
     do_uninstall_link_resolvConf
+    do_uninstall_link_vpnkit_service
+    do_uninstall_link_vpnkit
     do_uninstall_disable_generateResolvConf
     do_uninstall_wslkit_sudoers
     do_wsl_distrib_check_restart_needed
