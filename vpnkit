@@ -7,6 +7,7 @@
 
 version="1.0.0"
 powershell=/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe
+wslbin=/mnt/c/WINDOWS/system32/wsl.exe
 
 vpnkit_winrc_path=${vpnkit_winrc_path:-/mnt/c/wsl-tools/vpnkit}
 docker_desktop_installer_exe=${vpnkit_winrc_path}/docker-desktop/DockerDesktopInstaller.exe
@@ -311,8 +312,8 @@ FANCYTTY=false
 
 
 # Vars
-POWERSHELL=/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe
-WSL=/mnt/c/WINDOWS/system32/wsl.exe
+powershell=$powershell
+wslbin=$wslbin
 
 service_name="\$(basename "\$0")"
 service_name="\${service_name%.*}"
@@ -360,18 +361,18 @@ fail_unless_root() {
 
 # Check if wsl master instance is running
 is_master_running () {
-	\$WSL -l -v | iconv -f UTF-16LE -t UTF-8 | grep -qe " *\$1 *Running"
+	\$wslbin -l -v | iconv -f UTF-16LE -t UTF-8 | grep -qe " *\$1 *Running"
 }
 
 # Get remote service status
 get_master_status() {
 	# shellcheck disable=2086
-	\$WSL --distribution "\$1" --user "\$WSLVPNKIT_CROSS_DISTRO_USERNAME" -- \$cmd --status
+	\$wslbin --distribution "\$1" --user "\$WSLVPNKIT_CROSS_DISTRO_USERNAME" -- \$cmd --status
 }
 
 # Cleanup windows process if wsl abnormal restart
 cleanup_windows_process() {
-	\$POWERSHELL -Command 'Stop-Process -Name wsl-vpnkit -ErrorAction SilentlyContinue | Out-Null'
+	\$powershell -Command 'Stop-Process -Name wsl-vpnkit -ErrorAction SilentlyContinue | Out-Null'
 }
 
 # Wait for network connection
@@ -410,7 +411,7 @@ gracefull_cleanup(){
 
 restore_routes() {
 	log_action_msg "Restaure routes"
-	gateway=$(\$POWERSHELL -Command "(Get-NetAdapter 'vEthernet (WSL)' | Get-NetIPAddress -AddressFamily IPv4).IPAddress" | sed 's/[^[:print:]]//')
+	gateway=$(\$powershell -Command "(Get-NetAdapter 'vEthernet (WSL)' | Get-NetIPAddress -AddressFamily IPv4).IPAddress" | sed 's/[^[:print:]]//')
 	ip link set dev "\$TAP_NAME" down
 	ip route add default via "\$gateway" dev eth0 2>/dev/null
 	ip route flush cache
@@ -438,7 +439,7 @@ start() {
 			# using 'wsl.exe' allows the daemon to keep running in the background even when
 			# you close your terminal
 			# shellcheck disable=2086
-			\$WSL --distribution "\$WSL_DISTRO_NAME" --user "\$WSLVPNKIT_CROSS_DISTRO_USERNAME" -- \$cmd --oknodo --background --start -- -c "exec \$WSLVPNKIT_PATH >> \$LOG_PATH 2>&1"
+			\$wslbin --distribution "\$WSL_DISTRO_NAME" --user "\$WSLVPNKIT_CROSS_DISTRO_USERNAME" -- \$cmd --oknodo --background --start -- -c "exec \$WSLVPNKIT_PATH >> \$LOG_PATH 2>&1"
 			ret=\$?
 			log_begin_msg "Starting \$desc: \$service_name"
 			[ \$ret -eq 0 ] && { 
@@ -467,7 +468,7 @@ stop() {
 		get_master_status "\$WSLVPNKIT_MASTER"; then
 		echo "\$(date) - \$service_name is running on \$WSLVPNKIT_MASTER" >> "\$LOG_PATH"
 		# call remote stop
-		\$WSL --distribution "\$WSLVPNKIT_MASTER" --user "\$WSLVPNKIT_CROSS_DISTRO_USERNAME" -- service "\$service_name" stop
+		\$wslbin --distribution "\$WSLVPNKIT_MASTER" --user "\$WSLVPNKIT_CROSS_DISTRO_USERNAME" -- service "\$service_name" stop
 		ret=\$?
 		printf '%s  - %s stopped status %s' "\$(date)" "\$service_name" "\$([ \$ret -eq 0 ] && echo 'OK' || echo 'KO')"  >> "\$LOG_PATH"
 	else
@@ -718,7 +719,7 @@ do_wsl_distrib_check_restart_needed() {
     ! $wsl_need_restart && \
         info "No WSL restart needed" || {
             info "Restarting WSL..."
-            /mnt/c/WINDOWS/system32/wsl.exe --terminate "$WSL_DISTRO_NAME"
+            $wslbin --terminate "$WSL_DISTRO_NAME"
         }
 }
 
