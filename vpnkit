@@ -175,9 +175,11 @@ VPNKIT_GATEWAY_IP="192.168.67.1"
 VPNKIT_HOST_IP="192.168.67.2"
 VPNKIT_LOWEST_IP="192.168.67.3"
 VPNKIT_HIGHEST_IP="192.168.67.14"
+VPNKIT_TEST_URL="https://www.google.fr"
 
 # Script, pid and log paths
 WSLVPNKIT_PATH=$wsl_vpnkit_shell
+WSLVPNKIT_CROSS_DISTRO_USERNAME=root
 SOCKET_PATH=/var/run/wsl-vpnkit.sock
 PID_PATH=/var/run/wsl-vpnkit.pid
 LOG_PATH=/var/log/wsl-vpnkit.log
@@ -276,67 +278,213 @@ do_reconfigure_vpnkit_service () {
     info "Generate $vpnkit_service"
     cat > "$vpnkit_service" <<EOL
 #!/bin/sh
+# shellcheck disable=1090,1091,2034
 
-# load configuration
-. $wsl_vpnkit_config
-[ -f $wsl_vpnkit_master_config ] && . $wsl_vpnkit_master_config
-[ -f $wsl_init_distro_name ] && . $wsl_init_distro_name
-[ -z "\$WSL_DISTRO_NAME" ] && {
-    echo "WSL_DISTRO_NAME not set in \$wsl_init_distro_name"  | tee -a \$LOG_PATH
-    exit -1
-}
+# Get lsb functions
+# Note: log_begin_msg freeze on service stop..
+# Force FANCYTTY to false
+. /lib/lsb/init-functions
+FANCYTTY=false
 
-cmd="/sbin/start-stop-daemon --startas /bin/sh --make-pidfile --pidfile \$PID_PATH"
+
+# Vars
+POWERSHELL=/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe
+WSL=/mnt/c/WINDOWS/system32/wsl.exe
+
+service_name="\$(basename "\$0")"
+service_name="\${service_name%.*}"
+desc="\$(echo "\$service_name" | sed 's/.*/\u&/g')"
+cfg_file=$wsl_vpnkit_config
+cfg_master_file=$wsl_vpnkit_master_config
+cfg_distro_file=$wsl_init_distro_name
+cmd=""
 ret=0
 
-check_master() {
-    [ ! -n "\$WSLVPNKIT_MASTER" ] || {
-        [ "\$WSLVPNKIT_MASTER" = "\$WSL_DISTRO_NAME" ] || {
-            # assert Master is Runnind
-            /mnt/c/WINDOWS/system32/wsl.exe -l -v | iconv -f UTF-16LE -t UTF-8 | grep -e " *\$WSLVPNKIT_MASTER *Running"
-            ret=\$?
-            [ \$ret -eq 0 ] && {
-                echo "Master set to \$WSLVPNKIT_MASTER - Service not resquired here (\$WSL_DISTRO_NAME)"  | tee -a \$LOG_PATH
-                exit 0
-            } || {
-                echo "Master set to \$WSLVPNKIT_MASTER but not running. I have the power !"  | tee -a \$LOG_PATH
-            }
-        }
-    }
+
+# Functions
+check_init() {
+	[ -f "\$cfg_file" ] || {
+		log_failure_msg "\$desc not configured"
+		exit 1
+	}
+	. "\$cfg_file"
+
+	[ -f "\$cfg_master_file" ] && . "\$cfg_master_file"
+	[ -f "\$cfg_distro_file" ] && . "\$cfg_distro_file"
+
+	[ -x "\$WSLVPNKIT_PATH" ] || {
+		log_failure_msg "\$desc vpnkit.sh not present or not executable"
+		exit 1
+	}
+
+	[ -z "\$WSLVPNKIT_CROSS_DISTRO_USERNAME" ] && 
+		WSLVPNKIT_CROSS_DISTRO_USERNAME="\$(whoami)"
+
+	[ -z "\$WSL_DISTRO_NAME" ] && {
+		log_failure_msg "\$desc needs WSL_DISTRO_NAME environment variable"
+		exit 1
+	}
+	cmd="/sbin/start-stop-daemon --startas /bin/sh --make-pidfile --remove-pidfile --pidfile \$PID_PATH"
 }
 
+# Need to be root on each WSL instances
+fail_unless_root() {
+	if [ "\$(id -u)" != "0" ]; then
+		log_failure_msg "\$desc must be run as root"
+		exit 1
+	fi
+}
+
+# Check if wsl master instance is running
+is_master_running () {
+	\$WSL -l -v | iconv -f UTF-16LE -t UTF-8 | grep -qe " *\$1 *Running"
+}
+
+# Get remote service status
+get_master_status() {
+	# shellcheck disable=2086
+	\$WSL --distribution "\$1" --user "\$WSLVPNKIT_CROSS_DISTRO_USERNAME" -- \$cmd --status
+}
+
+# Cleanup windows process if wsl abnormal restart
+cleanup_windows_process() {
+	\$POWERSHELL -Command 'Stop-Process -Name wsl-vpnkit -ErrorAction SilentlyContinue | Out-Null'
+}
+
+# Wait for network connection
+wait_for_connexion() {
+	# shellcheck disable=2016
+    timeout -s TERM 45 bash -c \\
+	    'while [[ "\$(curl -s -o /dev/null -L -w ''%{http_code}'' -m 2 \${0})" != "200" ]]; do
+            sleep 2
+        done' "\${1}"
+}
+
+gracefull_cleanup(){
+
+	# shellcheck disable=SC2009
+	if ps -ef | grep -v grep | grep "\$service_name" | grep -v "\$service_name stop" >/dev/null; then
+		log_action_msg "Graceful kill of older processes"
+		for i in \$(ps -ef | grep "\$service_name" | grep -v grep | grep -v "\$service_name stop" | awk '{print \$2}'); do 
+			kill "\$i"; 
+		done
+	fi
+
+	# shellcheck disable=SC2009
+	if ps -ef | grep -v grep | grep "\$service_name" | grep -v "\$service_name stop"  >/dev/null; then
+		log_action_msg "Wait 60 sec for graceful death"
+		sleep 60
+	fi
+
+	# shellcheck disable=SC2009
+	if ps -ef | grep -v grep | grep "\$service_name" | grep -v "\$service_name stop" >/dev/null; then
+		log_action_msg "Not so graceful kill of older processes"
+		for i in \$(ps -ef | grep "\$service_name" | grep -v grep | grep -v "\$service_name stop" | awk '{print \$2}'); do 
+			kill -9 "\$i"; 
+		done
+	fi
+}
+
+
 start() {
-    check_master
-    echo "wsl-vpnkit starts at \$(date)" >> \$LOG_PATH
-    # using 'wsl.exe' allows the daemon to keep running in the background even when you close your terminal
-    #/mnt/c/WINDOWS/system32/wsl.exe --distribution \$WSL_DISTRO_NAME --user \$(whoami) -- \$cmd --oknodo --background --start -- -c "exec \$WSLVPNKIT_PATH >> \$LOG_PATH 2>&1"
-    \$cmd --background --no-close --start -- -c "exec \$WSLVPNKIT_PATH >> \$LOG_PATH 2>&1"
-    ret=\$?
-    [ \$ret -eq 0 ] && { 
-        echo "Setting master to: \$WSL_DISTRO_NAME"
-        echo "WSLVPNKIT_MASTER=\$WSL_DISTRO_NAME" > $wsl_vpnkit_master_config 
-        } || \\
-        echo "Prematurely Stopped at \$(date) - code \$ret" >> \$LOG_PATH
+	check_init
+	fail_unless_root
+				
+	# check started on other distributions...
+	if [ -n "\$WSLVPNKIT_MASTER" ] && \\
+		[ "\$WSLVPNKIT_MASTER" != "\$WSL_DISTRO_NAME" ] && \\
+		is_master_running "\$WSLVPNKIT_MASTER" && \\
+		get_master_status "\$WSLVPNKIT_MASTER"; then
+			echo "\$(date) - wsl-vpnkit is already running on \$WSLVPNKIT_MASTER" >> "\$LOG_PATH"
+			log_begin_msg "Starting \$desc: \$service_name is already running on \$WSLVPNKIT_MASTER"
+	else
+		# check local execution
+		if \$cmd --status ; then
+			log_begin_msg "Starting \$desc: \$service_name is already running on \$WSLVPNKIT_MASTER"
+		else 
+			# start daemon in this distribution
+			echo "wsl-vpnkit starts at \$(date)" >> "\$LOG_PATH"
+			cleanup_windows_process
+			# using 'wsl.exe' allows the daemon to keep running in the background even when
+			# you close your terminal
+			# shellcheck disable=2086
+			\$WSL --distribution "\$WSL_DISTRO_NAME" --user "\$WSLVPNKIT_CROSS_DISTRO_USERNAME" -- \$cmd --oknodo --background --start -- -c "exec \$WSLVPNKIT_PATH >> \$LOG_PATH 2>&1"
+			ret=\$?
+			log_begin_msg "Starting \$desc: \$service_name"
+			[ \$ret -eq 0 ] && { 
+				echo "Setting master to: \$WSL_DISTRO_NAME" >> "\$LOG_PATH"
+				echo "WSLVPNKIT_MASTER=\$WSL_DISTRO_NAME" > "\$cfg_master_file"
+				VPNKIT_TEST_URL="\${VPNKIT_TEST_URL:-https://www.google.com}"
+				sleep 2
+				log_action_begin_msg  "Waiting for Network"
+				wait_for_connexion "\$VPNKIT_TEST_URL"
+				ret=\$?
+				[ \$ret = 0 ] || log_failure_msg "No network reachable !"
+				} || echo "Prematurely Stopped at \$(date) - code \$ret" >> "\$LOG_PATH"
+		fi
+	fi
+	
+	log_end_msg \$ret
 }
 
 stop() {
-    check_master
-    \$cmd --oknodo --stop
-    ret=\$?
-    [ -f \$PID_PATH ] && rm -f \$PID_PATH
-    [ -f $wsl_vpnkit_master_config ] && rm -f $wsl_vpnkit_master_config
-    echo "Stopped at \$(date)" >> \$LOG_PATH
+	check_init
+	fail_unless_root
+
+	if [ -n "\$WSLVPNKIT_MASTER" ] && \\
+		[ "\$WSLVPNKIT_MASTER" != "\$WSL_DISTRO_NAME" ] && \\
+		is_master_running "\$WSLVPNKIT_MASTER" && \\
+		get_master_status "\$WSLVPNKIT_MASTER"; then
+		echo "\$(date) - wsl-vpnkit is running on \$WSLVPNKIT_MASTER" >> "\$LOG_PATH"
+		# call remote stop
+		\$WSL --distribution "\$WSLVPNKIT_MASTER" --user "\$WSLVPNKIT_CROSS_DISTRO_USERNAME" -- service wsl-vpnkit stop
+		ret=\$?
+		printf '%s  - wsl-vpnkit stopped status %s' "\$(date)"  "\$([ \$ret -eq 0 ] && echo 'OK' || echo 'KO')"  >> "\$LOG_PATH"
+	else
+		# stop local daemon in this distribution
+		[ -n "\$WSLVPNKIT_MASTER" ] \\
+			&& log_begin_msg "Stopping \$desc: \$service_name on \$WSLVPNKIT_MASTER" \\
+			|| log_warning_msg "\$desc: already stopped"
+
+		\$cmd --oknodo --stop >/dev/null
+		ret=\$?
+		[ -f "\$PID_PATH" ] && rm -f "\$PID_PATH"
+		[ -f "\$cfg_master_file" ] && rm -f "\$cfg_master_file"
+		gracefull_cleanup
+		cleanup_windows_process
+
+		log_end_msg \$ret
+	fi
+    echo "Stopped at \$(date)" >> "\$LOG_PATH"
 }
 
 status() {
-    check_master
-    \$cmd --status
-    ret=\$?
+
+    check_init
+	fail_unless_root
+	extra_txt="."
+
+	if [ -n "\$WSLVPNKIT_MASTER" ] && [ "\$WSLVPNKIT_MASTER" != "\$WSL_DISTRO_NAME" ]; then
+		if is_master_running "\$WSLVPNKIT_MASTER"; then
+			get_master_status "\$WSLVPNKIT_MASTER"
+			ret=\$?
+			extra_txt=" on \$WSLVPNKIT_MASTER"
+		else 
+			log_failure_msg "\$desc: master \$WSLVPNKIT_MASTER is not running"
+			ret=20
+		fi
+	else
+		\$cmd --status
+		ret=\$?
+	fi
+
     case "\$ret" in
-        0) echo "$wsl_vpnkit_name is running." ;;
-        1) echo "$wsl_vpnkit_name is not running and the pid file exists." ;;
-        3) echo "$wsl_vpnkit_name is not running." ;;
-        4) echo "Unable to determine program $wsl_vpnkit_name status." ;;
+        0) echo "wsl-vpnkit is running\$extra_txt" ;;
+        1) echo "wsl-vpnkit is not running and the pid file exists\$extra_txt" ;;
+        3) echo "wsl-vpnkit is not running\$extra_txt" ;;
+        4) echo "Unable to determine program wsl-vpnkit status\$extra_txt" ;;
+		10) echo "master \$WSLVPNKIT_MASTER is not running" ;;
+		*) echo "exit with code \$ret" ;;
     esac
 }
 
@@ -348,7 +496,7 @@ case "\$1" in
     *)          echo "Usage: wsl-vpnkit {start|stop|restart|status}"
                 exit 1
 esac
-exit \$ret    
+exit \$ret
 EOL
 }
 
@@ -587,6 +735,8 @@ do_status_all () {
 #------------------------------------------------------------------------------
 action=${1:-help}
 
+do_reconfigure_vpnkit_service
+exit
 case "$action" in
     -c|--clean) do_clean ;;
     -C|--clean-all) do_clean_all ;;
@@ -603,3 +753,4 @@ case "$action" in
     -v|--version) version ;;
     *)  help ;;
 esac
+
