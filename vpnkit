@@ -395,7 +395,7 @@ start() {
 		[ "\$WSLVPNKIT_MASTER" != "\$WSL_DISTRO_NAME" ] && \\
 		is_master_running "\$WSLVPNKIT_MASTER" && \\
 		get_master_status "\$WSLVPNKIT_MASTER"; then
-			echo "\$(date) - wsl-vpnkit is already running on \$WSLVPNKIT_MASTER" >> "\$LOG_PATH"
+			echo "\$(date) - \$service_name is already running on \$WSLVPNKIT_MASTER" >> "\$LOG_PATH"
 			log_begin_msg "Starting \$desc: \$service_name is already running on \$WSLVPNKIT_MASTER"
 	else
 		# check local execution
@@ -403,7 +403,7 @@ start() {
 			log_begin_msg "Starting \$desc: \$service_name is already running on \$WSLVPNKIT_MASTER"
 		else 
 			# start daemon in this distribution
-			echo "wsl-vpnkit starts at \$(date)" >> "\$LOG_PATH"
+			echo "\$service_name starts at \$(date)" >> "\$LOG_PATH"
 			cleanup_windows_process
 			# using 'wsl.exe' allows the daemon to keep running in the background even when
 			# you close your terminal
@@ -435,11 +435,11 @@ stop() {
 		[ "\$WSLVPNKIT_MASTER" != "\$WSL_DISTRO_NAME" ] && \\
 		is_master_running "\$WSLVPNKIT_MASTER" && \\
 		get_master_status "\$WSLVPNKIT_MASTER"; then
-		echo "\$(date) - wsl-vpnkit is running on \$WSLVPNKIT_MASTER" >> "\$LOG_PATH"
+		echo "\$(date) - \$service_name is running on \$WSLVPNKIT_MASTER" >> "\$LOG_PATH"
 		# call remote stop
-		\$WSL --distribution "\$WSLVPNKIT_MASTER" --user "\$WSLVPNKIT_CROSS_DISTRO_USERNAME" -- service wsl-vpnkit stop
+		\$WSL --distribution "\$WSLVPNKIT_MASTER" --user "\$WSLVPNKIT_CROSS_DISTRO_USERNAME" -- service "\$service_name" stop
 		ret=\$?
-		printf '%s  - wsl-vpnkit stopped status %s' "\$(date)"  "\$([ \$ret -eq 0 ] && echo 'OK' || echo 'KO')"  >> "\$LOG_PATH"
+		printf '%s  - %s stopped status %s' "\$(date)" "\$service_name" "\$([ \$ret -eq 0 ] && echo 'OK' || echo 'KO')"  >> "\$LOG_PATH"
 	else
 		# stop local daemon in this distribution
 		[ -n "\$WSLVPNKIT_MASTER" ] \\
@@ -479,10 +479,10 @@ status() {
 	fi
 
     case "\$ret" in
-        0) echo "wsl-vpnkit is running\$extra_txt" ;;
-        1) echo "wsl-vpnkit is not running and the pid file exists\$extra_txt" ;;
-        3) echo "wsl-vpnkit is not running\$extra_txt" ;;
-        4) echo "Unable to determine program wsl-vpnkit status\$extra_txt" ;;
+        0) echo "\$service_name is running\$extra_txt" ;;
+        1) echo "\$service_name is not running and the pid file exists\$extra_txt" ;;
+        3) echo "\$service_name is not running\$extra_txt" ;;
+        4) echo "Unable to determine program \$service_name status\$extra_txt" ;;
 		10) echo "master \$WSLVPNKIT_MASTER is not running" ;;
 		*) echo "exit with code \$ret" ;;
     esac
@@ -493,7 +493,7 @@ case "\$1" in
     stop)       stop ;;
     status)     status ;;
     restart)    stop; start ;;
-    *)          echo "Usage: wsl-vpnkit {start|stop|restart|status}"
+    *)          echo "Usage: \$service_name {start|stop|restart|status}"
                 exit 1
 esac
 exit \$ret
