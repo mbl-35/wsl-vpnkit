@@ -580,7 +580,7 @@ do_install_prerequisites () {
         err "ERROR: $(basename "$0") WSL_DISTRO_NAME env variable missing "
         exit 1
     }
-    curl -s -q http://www.google.com || {
+    curl -s -o /dev/null http://www.google.com || {
         err "ERROR: $(basename "$0") installation need network access"
         err "Please verify your /etc/resolv.conf file..."
         exit 1
