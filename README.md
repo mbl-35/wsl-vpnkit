@@ -1,3 +1,26 @@
+# **DEPRECATED** - no longer actively maintained
+
+WSL-VPNKIT instance creation procedure of the original [sakai135/wsl-vpnkit](https://github.com/sakai135/wsl-vpnkit) repo is now simpler and more robust...
+ 
+You can :
+- manual install it by (needs network acces from windows):
+  - download the latest `wsl-vpnkit.tar.gz` release at https://github.com/sakai135/wsl-vpnkit/releases,
+  - import this wsl2 instance with command: `wsl --import wsl-vpnkit <windows-wsl-storage> c:\Users\<yourname>\Downloads\wsl-vpnkit.tar.gz`
+  - starts the kit `wsl -d wsl-vpnkit service wsl-vpnkit-start`
+- use my [wsl-vpnkit-tray](https://github.com/mbl-35/wsl-vpnkit-tray) to start/stop (autostart) the wsl2 `wsl-vpnkit` named instance ..
+- when started, you will have network access from your others wsl2 instances
+
+
+If you use [scoop](https://github.com/ScoopInstaller/Scoop), it can be more simple to install both wsl-vpnkit and wsl-vpnkit-tray, using my 
+[scoop-srsrns](https://github.com/mbl-35/scoop-srsrns) buckets:
+```powershell
+PS> scoop bucket add srsrns https://raw.githubusercontent.com/mbl-35/scoop-srsrns
+PS> scoop update
+PS> scoop install wsl-vpnkit wsl-vpnkit-tray
+```
+---
+
+
 # wsl-vpnkit
 
 Because WSL2 and Entreprise Cisco AnyConnect Sercure Mobility Client with 2FA
